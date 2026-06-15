@@ -176,9 +176,15 @@ const mcqAptitudeGeneratorNode = async (state) => {
 
   console.log(`[MockTestAgent] 2/4 Generating MCQ (${counts.technical_mcq} tech, ${counts.aptitude_mcq} apt) at ${difficulty} level...`);
   try {
+    const targetTopics = state.customOptions?.topics || [];
+    const topicsConstraint = targetTopics.length > 0
+      ? `CRITICAL INSTRUCTION: You MUST generate technical questions ONLY for the following selected topics: ${targetTopics.join(", ")}. Do NOT generate questions on any other technologies, frameworks, or skills.\n\n`
+      : "";
+
     const mcqAptitudeSection = await generateJSON(
       "You are an expert technical interviewer creating a placement test for a " + ctx.role + " role. " +
       "The target difficulty level for all questions MUST be strictly: " + difficulty.toUpperCase() + ".\n\n" +
+      topicsConstraint +
       "CANDIDATE: Skills: " + ctx.skills.slice(0, 15).join(", ") + " | Education: " + (ctx.education || "B.Tech CS") + "\n" +
       "JD REQUIREMENTS: Required: " + ctx.requiredSkills.slice(0, 10).join(", ") + " | Critical: " + ctx.criticalSkills.slice(0, 5).join(", ") + "\n" +
       "TOPICS TO COVER: " + ctx.topicsToTest.slice(0, 6).join(", ") + "\n\n" +
@@ -238,11 +244,18 @@ const codingHRGeneratorNode = async (state) => {
 
   console.log(`[MockTestAgent] 3/4 Generating coding/conceptual/HR (${counts.coding} coding, ${counts.technical_conceptual} tech, ${counts.hr_behavioral} HR) at ${difficulty} level...`);
   try {
+    const targetTopics = state.customOptions?.topics || [];
+    const topicsConstraint = targetTopics.length > 0
+      ? `CRITICAL INSTRUCTION: You MUST generate coding and technical conceptual questions ONLY for the following selected topics: ${targetTopics.join(", ")}. Do NOT generate questions on any other technologies, frameworks, or skills.\n\n`
+      : "";
+
     const codingHRSection = await generateJSON(
       "You are an expert technical interviewer creating advanced questions for a " + ctx.role + " candidate. " +
       "The target difficulty level for all questions MUST be strictly: " + difficulty.toUpperCase() + ".\n\n" +
+      topicsConstraint +
       "CANDIDATE SKILLS: " + ctx.skills.slice(0, 12).join(", ") + "\n" +
       "CRITICAL SKILLS FROM JD: " + ctx.criticalSkills.slice(0, 5).join(", ") + "\n" +
+      "TOPICS TO COVER: " + ctx.topicsToTest.slice(0, 6).join(", ") + "\n\n" +
       "EXPERIENCE LEVEL: " + (ctx.experience || "Fresher") + "\n\n" +
       (ctx.kbInfo?.codingPatterns?.length > 0 ? "COMPANY CODING/OA PATTERNS: " + ctx.kbInfo.codingPatterns.join(", ") + "\n" : "") +
       (ctx.kbInfo?.oaPatterns?.length > 0 ? "COMPANY ONLINE ASSESSMENT PATTERNS: " + ctx.kbInfo.oaPatterns.join(", ") + "\n" : "") +
