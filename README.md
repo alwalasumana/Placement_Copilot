@@ -144,7 +144,7 @@ Create `server/.env`:
 
 ```env
 # Required
-MONGO_URI=mongodb://localhost:27017/placement-copilot
+MONGODB_URI=mongodb://localhost:27017/placement-copilot
 JWT_SECRET=your_jwt_secret_here
 GROK_API_KEY=your_groq_api_key_here
 
