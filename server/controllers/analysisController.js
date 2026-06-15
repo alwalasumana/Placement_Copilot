@@ -1,4 +1,4 @@
-import { runPlacementWorkflow, runPartialWorkflow } from '../langgraph/placementWorkflow.js';
+import { runPlacementWorkflow, runPartialWorkflow, getWorkflowStatus } from '../langgraph/placementWorkflow.js';
 import Resume from '../models/Resume.js';
 import JobDescription from '../models/JobDescription.js';
 import KnowledgeBase from '../models/KnowledgeBase.js';
@@ -75,6 +75,13 @@ export const refreshAnalysis = async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+};
+
+// ─── Get Workflow Progress (real-time polling) ────────────────────────────────
+export const getAnalysisStatus = (req, res) => {
+  const sessionId = req.sessionId;
+  const status = getWorkflowStatus(sessionId);
+  res.json({ success: true, ...status });
 };
 
 // ─── Get Skill Gap ────────────────────────────────────────────────────────────

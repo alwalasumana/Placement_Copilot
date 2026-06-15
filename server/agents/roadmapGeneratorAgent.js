@@ -33,6 +33,7 @@ const roadmapPlannerNode = async (state) => {
       return {
         roadmapResult: {
           success: true, cached: true, totalWeeks: existing.totalWeeks,
+          totalDays: existing.totalDays, timeframeUnit: existing.timeframeUnit,
           weeks: existing.weeks, milestones: existing.milestones || [],
           role: existing.role, candidateName: existing.candidateName,
         }
@@ -49,46 +50,41 @@ const roadmapPlannerNode = async (state) => {
     const jdDoc = await JobDescription.findOne({ sessionId });
     const userVal = jdDoc?.preparationTime;
     const unit = jdDoc?.preparationTimeUnit || 'weeks';
-    let userWeeks = null;
-    if (userVal && userVal > 0) {
-      if (unit === 'days') {
-        userWeeks = Math.max(1, Math.round(userVal / 7));
-      } else {
-        userWeeks = userVal;
-      }
-    }
-    let weeksToReady = userWeeks && userWeeks > 0 ? userWeeks : (sg.weeksToReady || 10);
-    // Cap timeframe between 1 and 16 weeks
-    weeksToReady = Math.max(1, Math.min(weeksToReady, 16));
+    
+    const isDayWise = (unit === 'days');
+    const totalDays = isDayWise ? Math.max(1, Math.min(userVal || 10, 30)) : 0;
+    const weeksToReady = !isDayWise ? Math.max(1, Math.min(userVal || 10, 16)) : Math.max(1, Math.round(totalDays / 7));
+    const totalCount = isDayWise ? totalDays : weeksToReady;
+    const timeLabel = isDayWise ? "days" : "weeks";
 
     // Safely compute phase ranges
     let p1Range, p2Range, p3Range;
     let p1End = 1, p2End = 1;
-    if (weeksToReady === 1) {
+    if (totalCount === 1) {
       p1Range = "1";
       p2Range = "1";
       p3Range = "1";
-    } else if (weeksToReady === 2) {
+    } else if (totalCount === 2) {
       p1Range = "1";
       p2Range = "1";
       p3Range = "2";
       p1End = 1;
       p2End = 1;
-    } else if (weeksToReady === 3) {
+    } else if (totalCount === 3) {
       p1Range = "1";
       p2Range = "2";
       p3Range = "3";
       p1End = 1;
       p2End = 2;
     } else {
-      p1End = Math.max(1, Math.round(weeksToReady * 0.3));
-      p2End = Math.max(p1End + 1, Math.round(weeksToReady * 0.7));
-      if (p2End >= weeksToReady) {
-        p2End = weeksToReady - 1;
+      p1End = Math.max(1, Math.round(totalCount * 0.3));
+      p2End = Math.max(p1End + 1, Math.round(totalCount * 0.7));
+      if (p2End >= totalCount) {
+        p2End = totalCount - 1;
       }
       p1Range = `1-${p1End}`;
       p2Range = `${p1End + 1}-${p2End}`;
-      p3Range = `${p2End + 1}-${weeksToReady}`;
+      p3Range = `${p2End + 1}-${totalCount}`;
     }
     
     const matchScore   = sg.overallMatchScore || 50;
@@ -102,24 +98,27 @@ const roadmapPlannerNode = async (state) => {
       "- Critical gaps: " + criticalGaps.map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
       "- Moderate gaps: " + moderateGaps.map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
       "- Quick wins: " + quickWins.slice(0, 4).join(", ") + "\n" +
-      "- Recommended preparation time: " + weeksToReady + " weeks\n\n" +
-      "Return EXACTLY this JSON structure. Set total_weeks dynamically to the recommended preparation time (" + weeksToReady + " weeks, capped between 1 and 16 weeks) and adjust the phases (e.g. week ranges like '" + p1Range + "', '" + p2Range + "', '" + p3Range + "') and success metrics accordingly:\n" +
+      "- Recommended preparation time: " + totalCount + " " + timeLabel + "\n\n" +
+      "Return EXACTLY this JSON structure. Set total_weeks or total_days dynamically to " + totalCount + " and adjust the phases (e.g. ranges like '" + p1Range + "', '" + p2Range + "', '" + p3Range + "') and success metrics accordingly. Set timeframe_unit to '" + timeLabel + "':\n" +
       JSON.stringify({
-        total_weeks: weeksToReady, overall_theme: "From " + matchScore + "% to 80%+ readiness for " + role,
+        total_weeks: isDayWise ? Math.max(1, Math.round(totalCount / 7)) : totalCount,
+        total_days: isDayWise ? totalCount : null,
+        timeframe_unit: timeLabel,
+        overall_theme: "From " + matchScore + "% to 80%+ readiness for " + role,
         phases: [
           { phase: 1, name: "Foundation", weeks: p1Range, goal: "Fill critical skill gaps", focus_areas: ["DSA basics", "Core language"] },
           { phase: 2, name: "Development", weeks: p2Range, goal: "Build project portfolio and deepen JD skills", focus_areas: ["Framework mastery", "Projects"] },
           { phase: 3, name: "Interview Prep", weeks: p3Range, goal: "Mock interviews and company-specific prep", focus_areas: ["Mock tests", "System design", "HR prep"] }
         ],
         daily_schedule: { weekday_hours: 3, weekend_hours: 5, morning: "DSA practice (1hr)", afternoon: "Tech skill study (1.5hr)", evening: "Project work / review (0.5hr)" },
-        success_metrics: { ["week_" + p1End]: "Critical gaps filled", ["week_" + p2End]: "2 projects complete", ["week_" + weeksToReady]: "80%+ mock test score" },
+        success_metrics: { [isDayWise ? "day_" + p1End : "week_" + p1End]: "Critical gaps filled", [isDayWise ? "day_" + p2End : "week_" + p2End]: "2 projects complete", [isDayWise ? "day_" + totalCount : "week_" + totalCount]: "80%+ mock test score" },
         starting_score: matchScore, target_score: 82,
         hiring_probability_start: sg.hiringProbabilityNow || 30,
         hiring_probability_end: sg.hiringProbabilityPrepared || 75
       }),
       { temperature: 0.3, maxOutputTokens: 3000 }
     );
-    console.log("[RoadmapAgent] 1/4 Plan created:", roadmapPlan.total_weeks, "weeks,", (roadmapPlan.phases || []).length, "phases");
+    console.log("[RoadmapAgent] 1/4 Plan created:", roadmapPlan.total_days || roadmapPlan.total_weeks, timeLabel, (roadmapPlan.phases || []).length, "phases");
     return { roadmapPlan: { ...roadmapPlan, role, name, criticalGaps, moderateGaps, quickWins } };
   } catch (err) {
     console.error("[RoadmapAgent] 1/4 ERROR:", err.message);
@@ -132,49 +131,89 @@ const weeklyContentGeneratorNode = async (state) => {
   if (state.roadmapResult?.cached || !state.roadmapPlan) return {};
   if ((state.errors || []).some(e => e.node === "roadmapPlanner")) return {};
   const plan = state.roadmapPlan;
-  console.log("[RoadmapAgent] 2/4 Generating weekly content for", plan.total_weeks, "weeks...");
+  const isDayWise = plan.timeframe_unit === 'days';
+  const totalCount = isDayWise ? plan.total_days : plan.total_weeks;
+  const timeLabel = isDayWise ? "days" : "weeks";
+  console.log("[RoadmapAgent] 2/4 Generating content for", totalCount, timeLabel + "...");
   try {
-    const totalWeeks = Math.max(1, Math.min(plan.total_weeks || 12, 16));
     const weeklyContent = await generateJSON(
-      "You are an expert technical trainer creating a week-by-week study plan for a candidate targeting: " + plan.role + "\n\n" +
-      "ROADMAP PHASES: " + (plan.phases || []).map(p => "Phase " + p.phase + ": " + p.name + " (" + p.weeks + ") - " + p.goal).join(" | ") + "\n" +
-      "CRITICAL GAPS TO FIX: " + (plan.criticalGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
-      "MODERATE GAPS: " + (plan.moderateGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
-      "QUICK WINS: " + (plan.quickWins || []).slice(0, 4).join(", ") + "\n" +
-      "TOTAL WEEKS: " + totalWeeks + "\n\n" +
-      "Generate EXACTLY " + totalWeeks + " weekly plan entries. Return this JSON structure. Ensure each weekly entry in the 'weeks' array has: 'week' (number), 'phase' (string), 'title' (string), 'estimatedHours' (number), 'difficulty' (string), 'topics' (array of strings), 'learningObjectives' (array of strings), 'practiceGoals' (array of strings), and 'resources' (array of objects with 'type' and 'title' properties). Do NOT use 'goals', 'milestones', 'estimated_hours', or simple strings for resources. They must match this exact schema:\n" +
-      JSON.stringify({
-        weeks: [{
-          week: 1, 
-          phase: "Foundation", 
-          title: "DSA Fundamentals",
-          estimatedHours: 20, 
-          difficulty: "beginner",
-          topics: ["Arrays", "Strings", "Two Pointers"],
-          learningObjectives: [
-            "Master array traversal and string manipulation algorithms",
-            "Understand the two-pointer technique for efficient search in lists"
-          ],
-          practiceGoals: [
-            "Solve 10 easy arrays & strings problems on LeetCode",
-            "Implement two-sum and reverse-string without using external libraries"
-          ],
-          resources: [
-            { type: "practice", title: "LeetCode Arrays & Strings Tagged Questions" },
-            { type: "video", title: "NeetCode Two Pointer Technique Walkthrough" },
-            { type: "article", title: "GeeksforGeeks Array & String Basics Guide" }
-          ],
-          checkInQuestion: "Can you solve two-sum variations in O(n) time and O(n) space?"
-        }],
-        overall_milestones: [
-          { week: 4, milestone: "Critical gaps filled", metric: "Can explain and implement critical skills" },
-          { week: 8, milestone: "Portfolio complete", metric: "2+ projects on GitHub" },
-          { week: 12, milestone: "Interview ready", metric: "80%+ on mock technical rounds" }
-        ]
-      }),
+      isDayWise
+        ? "You are an expert technical trainer creating a day-by-day study plan for a candidate targeting: " + plan.role + "\n\n" +
+          "ROADMAP PHASES: " + (plan.phases || []).map(p => "Phase " + p.phase + ": " + p.name + " (Day " + p.weeks + ") - " + p.goal).join(" | ") + "\n" +
+          "CRITICAL GAPS TO FIX: " + (plan.criticalGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
+          "MODERATE GAPS: " + (plan.moderateGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
+          "QUICK WINS: " + (plan.quickWins || []).slice(0, 4).join(", ") + "\n" +
+          "TOTAL DAYS: " + totalCount + "\n\n" +
+          "Generate EXACTLY " + totalCount + " daily plan entries under the 'weeks' array. Return this JSON structure. Ensure each entry has: 'week' (day number 1 to " + totalCount + "), 'phase' (string), 'title' (string), 'estimatedHours' (daily study hours, e.g. 2, 3, or 4), 'difficulty' (string), 'topics' (array of strings), 'learningObjectives' (array of strings), 'practiceGoals' (array of strings), and 'resources' (array of objects with 'type' and 'title'). Do NOT include 'dailyPlan' in daily entries.\n" +
+          JSON.stringify({
+            weeks: [{
+              week: 1,
+              phase: "Foundation",
+              title: "Learn Arrays basics",
+              estimatedHours: 3,
+              difficulty: "beginner",
+              topics: ["Arrays", "Traversal"],
+              learningObjectives: ["Understand memory layouts of arrays", "Implement basic array search"],
+              practiceGoals: ["Solve two-sum on LeetCode", "Complete 2 simple array drills"],
+              resources: [
+                { type: "practice", title: "LeetCode Arrays tag" },
+                { type: "article", title: "GeeksforGeeks Array Basics" }
+              ],
+              checkInQuestion: "Can you iterate through an array and find the maximum element?"
+            }],
+            overall_milestones: [
+              { week: Math.round(totalCount * 0.3), milestone: "Critical gaps filled", metric: "Explain basics clearly" },
+              { week: totalCount, milestone: "Interview ready", metric: "Complete all preparation" }
+            ]
+          })
+        : "You are an expert technical trainer creating a week-by-week study plan for a candidate targeting: " + plan.role + "\n\n" +
+          "ROADMAP PHASES: " + (plan.phases || []).map(p => "Phase " + p.phase + ": " + p.name + " (" + p.weeks + ") - " + p.goal).join(" | ") + "\n" +
+          "CRITICAL GAPS TO FIX: " + (plan.criticalGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
+          "MODERATE GAPS: " + (plan.moderateGaps || []).map(g => g.skill || g).slice(0, 6).join(", ") + "\n" +
+          "QUICK WINS: " + (plan.quickWins || []).slice(0, 4).join(", ") + "\n" +
+          "TOTAL WEEKS: " + totalCount + "\n\n" +
+          "Generate EXACTLY " + totalCount + " weekly plan entries. Return this JSON structure. Ensure each weekly entry in the 'weeks' array has: 'week' (number), 'phase' (string), 'title' (string), 'estimatedHours' (number), 'difficulty' (string), 'topics' (array of strings), 'learningObjectives' (array of strings), 'practiceGoals' (array of strings), and 'resources' (array of objects with 'type' and 'title' properties). Do NOT use 'goals', 'milestones', 'estimated_hours', or simple strings for resources. They must match this exact schema:\n" +
+          JSON.stringify({
+            weeks: [{
+              week: 1,
+              phase: "Foundation",
+              title: "DSA Fundamentals",
+              estimatedHours: 20,
+              difficulty: "beginner",
+              topics: ["Arrays", "Strings", "Two Pointers"],
+              learningObjectives: [
+                "Master array traversal and string manipulation algorithms",
+                "Understand the two-pointer technique for efficient search in lists"
+              ],
+              practiceGoals: [
+                "Solve 10 easy arrays & strings problems on LeetCode",
+                "Implement two-sum and reverse-string without using external libraries"
+              ],
+              dailyPlan: [
+                { day: "Day 1 (Mon)", focus: "Arrays basics", tasks: ["Study array operations", "Solve 3 easy array problems"] },
+                { day: "Day 2 (Tue)", focus: "String manipulation", tasks: ["Study string methods", "Solve 3 string problems"] },
+                { day: "Day 3 (Wed)", focus: "Two pointers", tasks: ["Learn two-pointer technique", "Solve two-sum variants"] },
+                { day: "Day 4 (Thu)", focus: "Practice", tasks: ["Solve 5 mixed easy problems", "Review mistakes"] },
+                { day: "Day 5 (Fri)", focus: "Deep dive", tasks: ["One medium problem", "Implement from scratch"] },
+                { day: "Day 6 (Sat)", focus: "Project / build", tasks: ["Apply skills to mini project", "Document code"] },
+                { day: "Day 7 (Sun)", focus: "Revision & rest", tasks: ["Review week notes", "Plan next week"] }
+              ],
+              resources: [
+                { type: "practice", title: "LeetCode Arrays & Strings Tagged Questions" },
+                { type: "video", title: "NeetCode Two Pointer Technique Walkthrough" },
+                { type: "article", title: "GeeksforGeeks Array & String Basics Guide" }
+              ],
+              checkInQuestion: "Can you solve two-sum variations in O(n) time and O(n) space?"
+            }],
+            overall_milestones: [
+              { week: 4, milestone: "Critical gaps filled", metric: "Can explain and implement critical skills" },
+              { week: 8, milestone: "Portfolio complete", metric: "2+ projects on GitHub" },
+              { week: 12, milestone: "Interview ready", metric: "80%+ on mock technical rounds" }
+            ]
+          }),
       { temperature: 0.4, maxOutputTokens: 3500 }
     );
-    console.log("[RoadmapAgent] 2/4 Generated", (weeklyContent.weeks || []).length, "weeks of content");
+    console.log("[RoadmapAgent] 2/4 Generated", (weeklyContent.weeks || []).length, "entries");
     return { weeklyContent };
   } catch (err) {
     console.error("[RoadmapAgent] 2/4 ERROR:", err.message);
@@ -240,6 +279,8 @@ const roadmapFinalizerNode = async (state) => {
   const docData = {
     sessionId, role: p.role || "Software Engineer", candidateName: p.name || "Candidate",
     totalWeeks: p.total_weeks || 12, overallTheme: p.overall_theme || "Interview Preparation",
+    totalDays: p.total_days || null,
+    timeframeUnit: p.timeframe_unit || 'weeks',
     preparationPhases: p.phases || [],
     dailySchedule: p.daily_schedule || {},
     milestones: w.overall_milestones || [],
@@ -263,7 +304,7 @@ const roadmapFinalizerNode = async (state) => {
     success: true, cached: false, ...docData,
     weekCount: (w.weeks || []).length,
   };
-  console.log("[RoadmapAgent] Complete --", (w.weeks || []).length, "weeks |", p.total_weeks, "week plan");
+  console.log("[RoadmapAgent] Complete --", (w.weeks || []).length, "entries |", p.timeframe_unit, "plan");
   return { roadmapResult };
 };
 

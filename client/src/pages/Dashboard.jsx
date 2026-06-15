@@ -46,30 +46,33 @@ export default function Dashboard() {
   const runAnalysis = async () => {
     setAnalysisRunning(true);
     setCompletedAgents([]);
-    
-    // Simulate step-by-step agent progress (every 4 seconds) to show live status updates
-    const agentSequence = ['knowledge', 'resume', 'jd', 'mocktest', 'skillgap', 'roadmap', 'readiness'];
-    let currentIndex = 0;
-    const progressInterval = setInterval(() => {
-      if (currentIndex < agentSequence.length) {
-        setCompletedAgents(prev => [...prev, agentSequence[currentIndex]]);
-        currentIndex++;
+
+    // Poll /api/analysis/status every 2s to get real agent completion data
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await api.get('/analysis/status');
+        if (statusRes.data.completedAgents?.length) {
+          setCompletedAgents(statusRes.data.completedAgents);
+        }
+      } catch {
+        // polling errors are non-fatal — main request still running
       }
-    }, 4500);
+    }, 2000);
 
     try {
       const res = await api.post('/analysis/run');
       const data = res.data;
+      clearInterval(pollInterval);
       if (data.success) {
-        clearInterval(progressInterval);
-        setCompletedAgents(agentSequence); // Mark all as completed
+        const allAgents = ['knowledge', 'resume', 'jd', 'mocktest', 'skillgap', 'roadmap', 'readiness'];
+        setCompletedAgents(allAgents);
         setAnalysisComplete(data.results);
         toast.success('Analysis complete! All agents finished successfully.');
       } else {
         throw new Error(data.error || 'Analysis failed');
       }
     } catch (err) {
-      clearInterval(progressInterval);
+      clearInterval(pollInterval);
       setCompletedAgents([]);
       setAnalysisError(err.message);
       toast.error(err.message);
@@ -97,8 +100,36 @@ export default function Dashboard() {
   };
 
   const readiness = readinessData?.compositeReadiness || 0;
-  const readinessLevel = readinessData?.readinessTier || 'low';
+  const readinessTier = readinessData?.readinessTier || '';
   const skillMatch = skillGapData?.overallMatchScore || 0;
+
+  const missingSkillsList = [];
+  if (skillGapData) {
+    if (Array.isArray(skillGapData.criticalGaps) && skillGapData.criticalGaps.length > 0) {
+      skillGapData.criticalGaps.forEach(s => {
+        missingSkillsList.push({
+          skill: s.skill,
+          priority: s.severity || 'critical'
+        });
+      });
+    }
+    if (Array.isArray(skillGapData.moderateGaps) && skillGapData.moderateGaps.length > 0) {
+      skillGapData.moderateGaps.forEach(s => {
+        missingSkillsList.push({
+          skill: s.skill,
+          priority: s.severity || 'medium'
+        });
+      });
+    }
+    if (missingSkillsList.length === 0 && Array.isArray(skillGapData.missingSkills)) {
+      skillGapData.missingSkills.forEach(skill => {
+        missingSkillsList.push({
+          skill: skill,
+          priority: 'high'
+        });
+      });
+    }
+  }
 
   const radarData = readinessData ? [
     { subject: 'Resume', value: readinessData.scores?.resume || 0 },
@@ -107,7 +138,14 @@ export default function Dashboard() {
     { subject: 'Company', value: readinessData.scores?.kb || 0 },
   ] : [];
 
-  const readinessColor = readinessLevel === 'high' ? 'green' : readinessLevel === 'medium' ? 'yellow' : 'red';
+  // Map DB tier names → UI colour (same tiers the readiness agent writes to MongoDB)
+  const readinessColor =
+    readinessTier === 'interview_ready' ? 'green' :
+    readinessTier === 'near_ready'      ? 'green' :
+    readinessTier === 'developing'      ? 'yellow' :
+    readinessTier === 'early_stage'     ? 'red' :
+    readinessTier === 'needs_foundation'? 'red' :
+    readiness >= 65 ? 'green' : readiness >= 45 ? 'yellow' : 'red';
 
   const QUICK_ACTIONS = [
     { label: 'Upload Materials', icon: BookOpen, to: '/knowledge', done: uploadedCount > 0 },
@@ -157,9 +195,11 @@ export default function Dashboard() {
           <CardHeader title="Run AI Analysis" icon={Brain} subtitle="Multi-agent LangGraph pipeline" />
           <CardBody className="space-y-4">
             {analysisRunning ? (
-              <AgentProgress 
-                agents={completedAgents} 
-                currentAgent={['knowledge', 'resume', 'jd', 'mocktest', 'skillgap', 'roadmap', 'readiness'][completedAgents.length]} 
+              <AgentProgress
+                agents={completedAgents}
+                currentAgent={
+                  ['knowledge', 'resume', 'jd', 'mocktest', 'skillgap', 'roadmap', 'readiness'][completedAgents.length]
+                }
               />
             ) : (
               <div className="space-y-3">
@@ -268,7 +308,7 @@ export default function Dashboard() {
             <CardHeader title="Top Missing Skills" subtitle="Critical gaps to address" icon={TrendingUp} />
             <CardBody>
               <div className="space-y-2">
-                {(skillGapData.missingSkills || []).slice(0, 5).map((s, i) => (
+                {(missingSkillsList || []).slice(0, 5).map((s, i) => (
                   <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                     <span className="text-sm text-gray-700 dark:text-gray-300">{s.skill}</span>
                     <span className={`text-xs px-2 py-1 rounded-lg font-medium

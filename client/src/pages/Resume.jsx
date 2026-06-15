@@ -12,7 +12,10 @@ export default function Resume() {
   const { setHasResume, resumeData, setAnalysisComplete } = useAppStore();
   const [uploading, setUploading] = useState(false);
   const [extracting, setExtracting] = useState(false);
-  const [resume, setResume] = useState(resumeData);
+  // resumeData from store is the raw resumeResult object {success, structured, score, ...}
+  // Normalise so we always hold the structured sub-object at the top level
+  const normaliseResume = (r) => r?.structured || r || null;
+  const [resume, setResume] = useState(normaliseResume(resumeData));
   const getResumeSkills = () => {
     if (!resume) return [];
     if (Array.isArray(resume.allSkills)) return resume.allSkills;
@@ -115,14 +118,21 @@ export default function Resume() {
                {resume.summary && (
                  <p className="text-sm text-gray-600 dark:text-gray-400 italic">"{resume.summary}"</p>
                )}
-               <div>
-                 <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Education</p>
-                 {(resume.education || []).map((e, i) => (
-                   <div key={i} className="text-sm text-gray-700 dark:text-gray-300">
-                     {e.degree} — {e.institution} {e.year && `(${e.year})`} {e.cgpa && `· ${e.cgpa}`}
-                   </div>
-                 ))}
-               </div>
+               {(resume.education || []).length > 0 && (
+                 <div>
+                   <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Education</p>
+                   {resume.education.map((e, i) => (
+                     <div key={i} className="text-sm text-gray-700 dark:text-gray-300 mb-1">
+                       {e.degree} — {e.institution}
+                       {e.year && ` (${e.year})`}
+                       {e.cgpa && ` · CGPA: ${e.cgpa}`}
+                     </div>
+                   ))}
+                 </div>
+               )}
+               {(resume.education || []).length === 0 && (resume.personalInfo?.name || resume.name) && (
+                 <p className="text-xs text-gray-400">Education details not found in resume. Add them manually or re-upload.</p>
+               )}
              </CardBody>
            </Card>
          ) : (

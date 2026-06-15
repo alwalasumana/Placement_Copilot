@@ -85,17 +85,18 @@ const contextAssemblerNode = async (state) => {
         finalTestId = uuidv4();
         existing.testId = finalTestId;
         if (!existing.title) {
-          existing.title = `Mock Test for ${existing.company || "Target Company"} - ${existing.role || "Software Engineer"}`;
+          const _c = existing.company; const _r = existing.role || "Software Engineer";
+          existing.title = _c ? `Mock Test for ${_c} - ${_r}` : `Mock Test for ${_r}`;
         }
         await existing.save();
       }
-      return { 
-        mockTestResult: { 
-          success: true, 
-          cached: true, 
+      return {
+        mockTestResult: {
+          success: true,
+          cached: true,
           testId: finalTestId,
           testMongoId: existing._id.toString(),
-          title: existing.title || `Mock Test for ${existing.company || "Target Company"}`,
+          title: existing.title || `Mock Test for ${existing.role || "Software Engineer"}`,
           sections: existing.sections, 
           allQuestions: existing.allQuestions, 
           totalQuestions: existing.totalQuestions 
@@ -404,19 +405,21 @@ const testAssemblerNode = async (state) => {
 
   let finalTestId = uuidv4();
   
-  const companyName = ctx.company || "Target Company";
+  // Use real company name from JD; fall back to role-based label (never "Target Company")
+  const companyName = ctx.company || null;
   const roleName = ctx.role || "Software Engineer";
   const diffLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
-  
+  const targetLabel = companyName ? `${companyName} - ${roleName}` : roleName;
+
   let finalTitle = "";
   if (state.customOptions) {
     let topicsStr = "";
     if (state.customOptions.topics && state.customOptions.topics.length > 0) {
       topicsStr = ` (${state.customOptions.topics.slice(0, 2).join(", ")}${state.customOptions.topics.length > 2 ? "..." : ""})`;
     }
-    finalTitle = `Custom ${diffLabel} Mock Test${topicsStr} for ${companyName} - ${roleName}`;
+    finalTitle = `Custom ${diffLabel} Mock Test${topicsStr} for ${targetLabel}`;
   } else {
-    finalTitle = `Standard Mock Test for ${companyName} - ${roleName}`;
+    finalTitle = `Mock Test for ${targetLabel}`;
   }
 
   let updatedDocId = "";
@@ -438,7 +441,7 @@ const testAssemblerNode = async (state) => {
       totalQuestions,
       totalDuration,
       generatedAt: new Date().toISOString(),
-      generatedFrom: state.customOptions ? "Custom Generation" : "System Analysis",
+      generatedFrom: state.customOptions ? "Custom Generation" : "Auto Generated",
       warnings: nodeErrors.map(e => e.error)
     });
     updatedDocId = created._id.toString();

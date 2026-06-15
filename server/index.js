@@ -36,23 +36,23 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
+// ─── Rate Limiting (relaxed for testing) ─────────────────────────────────────
 const analysisLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  message: { success: false, error: 'Too many analysis requests. Please wait 15 minutes.' },
+  windowMs: 60 * 1000,
+  max: 100,
+  message: { success: false, error: 'Too many analysis requests.' },
 });
 
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 200,
+  max: 100,
   message: { success: false, error: 'Too many upload requests.' },
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  message: { success: false, error: 'Too many auth attempts. Please wait.' },
+  windowMs: 60 * 1000,
+  max: 100,
+  message: { success: false, error: 'Too many login attempts.' },
 });
 
 // ─── Parsing Middleware ───────────────────────────────────────────────────────

@@ -276,29 +276,72 @@ export const recalculateReadinessScores = async (sessionId) => {
       mockTestScore = Math.round(totalPct / testResults.length);
     }
 
-    // 2. Update scores
+    // 2. Fetch baseline Resume score and compute dynamic ATS-friendly score
+    let baseResumeScore = 70;
+    try {
+      const ResumeModel = (await import("../models/Resume.js")).default;
+      const resumeDoc = await ResumeModel.findOne({ sessionId });
+      if (resumeDoc) {
+        baseResumeScore = resumeDoc.structured?.overallScore || resumeDoc.score || 70;
+      }
+    } catch (err) {
+      console.error("Resume lookup failed during recalculation:", err.message);
+    }
+
+    const skillMatchVal = report.scores?.skillMatch || 0;
+    const criticalSkillsVal = report.scores?.criticalSkills || 0;
+    const kbVal = report.scores?.kb || 0;
+    const roadmapVal = report.scores?.roadmap || 0;
+
+    const atsFriendlyResumeScore = Math.round((baseResumeScore * 0.7) + (skillMatchVal * 0.3));
+
+    // Update scores in report document
     report.scores = report.scores || {};
     report.scores.mockTest = mockTestScore;
+    report.scores.resume = atsFriendlyResumeScore;
 
     // 3. Recalculate composite score using standard weights:
     // skillMatch 40%, criticalSkills 30%, resume 15%, kb 10%, roadmap 5% (mockTest excluded)
-    const resumeVal = report.scores.resume || 0;
-    const skillMatchVal = report.scores.skillMatch || 0;
-    const criticalSkillsVal = report.scores.criticalSkills || 0;
-    const kbVal = report.scores.kb || 0;
-    const roadmapVal = report.scores.roadmap || 0;
-
     const composite = Math.round(
-      (skillMatchVal      * 0.40) +
-      (criticalSkillsVal   * 0.30) +
-      (resumeVal          * 0.15) +
-      (kbVal              * 0.10) +
-      (roadmapVal         * 0.05)
+      (skillMatchVal           * 0.40) +
+      (criticalSkillsVal        * 0.30) +
+      (atsFriendlyResumeScore   * 0.15) +
+      (kbVal                   * 0.10) +
+      (roadmapVal              * 0.05)
     );
 
     report.compositeReadiness = composite;
 
-    // 4. Update tier
+    // 4. Calculate programmatic interview round readiness scores
+    const onlineAssessment = Math.min(100, Math.round((mockTestScore * 0.4) + (skillMatchVal * 0.4) + (criticalSkillsVal * 0.2)));
+    const technicalInterview = Math.min(100, Math.round((skillMatchVal * 0.4) + (criticalSkillsVal * 0.3) + (kbVal * 0.2) + (mockTestScore * 0.1)));
+    const hrRound = Math.min(100, Math.round((baseResumeScore * 0.5) + (mockTestScore * 0.3) + 20));
+    const codingRound = Math.min(100, Math.round((mockTestScore * 0.5) + (skillMatchVal * 0.3) + (criticalSkillsVal * 0.2)));
+
+    report.interviewRoundReadiness = {
+      online_assessment: {
+        ready: onlineAssessment >= 70,
+        score: onlineAssessment,
+        gaps: report.interviewRoundReadiness?.online_assessment?.gaps || []
+      },
+      technical_interview: {
+        ready: technicalInterview >= 70,
+        score: technicalInterview,
+        gaps: report.interviewRoundReadiness?.technical_interview?.gaps || []
+      },
+      hr_round: {
+        ready: hrRound >= 70,
+        score: hrRound,
+        gaps: report.interviewRoundReadiness?.hr_round?.gaps || []
+      },
+      coding_round: {
+        ready: codingRound >= 70,
+        score: codingRound,
+        gaps: report.interviewRoundReadiness?.coding_round?.gaps || []
+      }
+    };
+
+    // 5. Update tier
     const rawTier = (
       composite >= 80 ? "interview_ready" :
       composite >= 65 ? "near_ready" :
@@ -308,7 +351,7 @@ export const recalculateReadinessScores = async (sessionId) => {
     report.readinessTier = rawTier;
 
     await report.save();
-    console.log(`[ReadinessRecalculator] Successfully updated mockTest score to ${mockTestScore}% and composite to ${composite}% for session ${sessionId}`);
+    console.log(`[ReadinessRecalculator] Successfully updated mockTest score to ${mockTestScore}%, resume to ${atsFriendlyResumeScore}%, and composite to ${composite}% for session ${sessionId}`);
   } catch (err) {
     console.error('Failed to recalculate readiness score:', err.message);
   }

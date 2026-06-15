@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Map, CheckCircle, Circle, Clock, BookOpen, Target, Zap } from 'lucide-react';
+import { Map, CheckCircle, Circle, Clock, BookOpen, Target, Zap, Calendar } from 'lucide-react';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import ProgressBar from '../components/ui/ProgressBar';
 import Badge from '../components/ui/Badge';
@@ -71,8 +71,10 @@ export default function Roadmap() {
   );
 
   const weeks = data.weeks || [];
-  const completedWeeks = weeks.filter(w => w.completed || roadmapProgress[w.week]).length;
-  const progress = weeks.length > 0 ? Math.round((completedWeeks / weeks.length) * 100) : 0;
+  const isDays = data.timeframeUnit === 'days';
+  const totalCount = isDays ? (data.totalDays || weeks.length) : (data.totalWeeks || weeks.length);
+  const completedCount = weeks.filter(w => w.completed || roadmapProgress[w.week]).length;
+  const progress = weeks.length > 0 ? Math.round((completedCount / weeks.length) * 100) : 0;
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -84,9 +86,9 @@ export default function Roadmap() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total Weeks', value: data.totalWeeks },
-          { label: 'Completed', value: completedWeeks },
-          { label: 'Remaining', value: data.totalWeeks - completedWeeks },
+          { label: isDays ? 'Total Days' : 'Total Weeks', value: totalCount },
+          { label: 'Completed', value: completedCount },
+          { label: isDays ? 'Remaining Days' : 'Remaining Weeks', value: Math.max(0, totalCount - completedCount) },
           { label: 'Progress', value: `${progress}%` },
         ].map(({ label, value }) => (
           <Card key={label}>
@@ -136,7 +138,7 @@ export default function Roadmap() {
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-brand-500 uppercase">Week {week.week}</span>
+                    <span className="text-xs font-bold text-brand-500 uppercase">{isDays ? 'Day' : 'Week'} {week.week}</span>
                     {isCurrent && <Badge variant="brand" size="xs">Current</Badge>}
                     {isCompleted && <Badge variant="success" size="xs">Done</Badge>}
                   </div>
@@ -144,7 +146,7 @@ export default function Roadmap() {
                   <div className="flex items-center gap-3 mt-1">
                     {week.estimatedHours && (
                       <span className="text-xs text-gray-400 flex items-center gap-1">
-                        <Clock size={10} /> {week.estimatedHours}h/week
+                        <Clock size={10} /> {week.estimatedHours}h/{isDays ? 'day' : 'week'}
                       </span>
                     )}
                     <span className="text-xs text-gray-400">{(week.topics || []).length} topics</span>
@@ -198,6 +200,32 @@ export default function Roadmap() {
                         {week.practiceGoals.map((g, i) => (
                           <div key={i} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400">
                             <span className="text-green-400 flex-shrink-0">▸</span> {g}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Daily Plan */}
+                  {!isDays && (week.dailyPlan || []).length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                        <Calendar size={10} /> Daily Breakdown
+                      </p>
+                      <div className="space-y-2">
+                        {week.dailyPlan.map((d, i) => (
+                          <div key={i} className="flex items-start gap-3 p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-700/50">
+                            <span className="text-xs font-semibold text-brand-500 w-28 flex-shrink-0 pt-0.5">{d.day}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{d.focus}</p>
+                              <ul className="space-y-0.5">
+                                {(d.tasks || []).map((t, j) => (
+                                  <li key={j} className="text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1">
+                                    <span className="text-brand-400 flex-shrink-0">·</span>{t}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
                           </div>
                         ))}
                       </div>

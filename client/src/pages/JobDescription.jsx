@@ -240,12 +240,12 @@ export default function JobDescription() {
           </Card>
         ) : jd ? (
           <Card>
-            <CardHeader title={jd.role || 'Position'} subtitle={jd.companyName} icon={Briefcase} />
+            <CardHeader title={jd.role || 'Position'} subtitle={jd.company || jd.companyName} icon={Briefcase} />
             <CardBody className="space-y-3">
-              {jd.experience && (
+              {(jd.experience_required || jd.experience) && (
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-gray-400">Experience:</span>
-                  <Badge variant="info">{jd.experience}</Badge>
+                  <Badge variant="info">{jd.experience_required || jd.experience}</Badge>
                 </div>
               )}
               {jd.location && (
@@ -254,8 +254,8 @@ export default function JobDescription() {
                   <span className="text-gray-700 dark:text-gray-300">{jd.location}</span>
                 </div>
               )}
-              {jd.summary && (
-                <p className="text-sm text-gray-600 dark:text-gray-400 italic">{jd.summary}</p>
+              {(jd.role_summary || jd.summary) && (
+                <p className="text-sm text-gray-600 dark:text-gray-400 italic">{jd.role_summary || jd.summary}</p>
               )}
             </CardBody>
           </Card>
@@ -278,11 +278,11 @@ export default function JobDescription() {
               <div className="flex flex-wrap gap-2">
                 {(jd.requiredSkills || []).map(s => <Badge key={s} variant="danger">{s}</Badge>)}
               </div>
-              {(jd.preferredSkills || []).length > 0 && (
+              {((jd.preferred_skills || jd.preferredSkills) || []).length > 0 && (
                 <div className="mt-4">
                   <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Preferred (Nice-to-have)</p>
                   <div className="flex flex-wrap gap-2">
-                    {jd.preferredSkills.map(s => <Badge key={s} variant="warning">{s}</Badge>)}
+                    {(jd.preferred_skills || jd.preferredSkills).map(s => <Badge key={s} variant="warning">{s}</Badge>)}
                   </div>
                 </div>
               )}
@@ -293,29 +293,46 @@ export default function JobDescription() {
           <Card>
             <CardHeader title="Responsibilities" icon={List} />
             <CardBody>
-              <ul className="space-y-2">
-                {(jd.responsibilities || []).map((r, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <CheckSquare size={14} className="text-brand-500 mt-0.5 flex-shrink-0" />
-                    {r}
-                  </li>
-                ))}
-              </ul>
+              {(jd.responsibilities || []).length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No responsibilities extracted. Re-run the full analysis.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {jd.responsibilities.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <CheckSquare size={14} className="text-brand-500 mt-0.5 flex-shrink-0" />
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </CardBody>
           </Card>
 
-          {/* Qualifications */}
-          {(jd.qualifications || []).length > 0 && (
+          {/* Qualifications — AI returns an object {education, min_cgpa, branches, ...} */}
+          {jd.qualifications && (
             <Card className="lg:col-span-2">
               <CardHeader title="Qualifications" icon={CheckSquare} />
               <CardBody>
                 <div className="grid sm:grid-cols-2 gap-2">
-                  {jd.qualifications.map((q, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
-                      <span className="text-sm text-gray-600 dark:text-gray-400">{q}</span>
-                    </div>
-                  ))}
+                  {Array.isArray(jd.qualifications)
+                    ? jd.qualifications.map((q, i) => (
+                        <div key={i} className="flex items-start gap-2 p-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
+                          <span className="text-sm text-gray-600 dark:text-gray-400">{q}</span>
+                        </div>
+                      ))
+                    : Object.entries(jd.qualifications)
+                        .filter(([, v]) => v && !(Array.isArray(v) && v.length === 0))
+                        .map(([k, v], i) => (
+                          <div key={i} className="flex items-start gap-2 p-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
+                            <span className="text-sm text-gray-600 dark:text-gray-400">
+                              <span className="font-medium capitalize">{k.replace(/_/g, ' ')}: </span>
+                              {Array.isArray(v) ? v.join(', ') : String(v)}
+                            </span>
+                          </div>
+                        ))
+                  }
                 </div>
               </CardBody>
             </Card>

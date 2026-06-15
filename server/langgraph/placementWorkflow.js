@@ -49,6 +49,7 @@ const PlacementState = Annotation.Root({
   startedAt:           Annotation({ reducer: (_, b) => b ?? _ }),
   completedAt:         Annotation({ reducer: (_, b) => b ?? _ }),
   knowledgeBaseResult: Annotation({ reducer: (_, b) => b ?? _ }),
+  kbResult:            Annotation({ reducer: (_, b) => b ?? _ }), // alias for agents that expect kbResult
   resumeResult:        Annotation({ reducer: (_, b) => b ?? _ }),
   jdResult:            Annotation({ reducer: (_, b) => b ?? _ }),
   mockTestResult:      Annotation({ reducer: (_, b) => b ?? _ }),
@@ -58,33 +59,71 @@ const PlacementState = Annotation.Root({
   errors:              Annotation({ reducer: (a, b) => [...(a || []), ...(b || [])] }),
 });
 
+// ─── Real-time Progress Tracking ─────────────────────────────────────────────
+// Keyed by sessionId. Cleared after workflow completes.
+const workflowProgress = new Map();
+
+export const getWorkflowStatus = (sessionId) => {
+  const s = workflowProgress.get(sessionId) || { running: false, completedAgents: [], runningAgents: [] };
+  // Keep legacy currentAgent field for backwards compat
+  return { ...s, currentAgent: s.runningAgents?.[0] || null };
+};
+
+const markAgent = (sessionId, ...agents) => {
+  const prev = workflowProgress.get(sessionId) || { running: true, completedAgents: [], runningAgents: [] };
+  workflowProgress.set(sessionId, {
+    running: true,
+    runningAgents: [...new Set([...(prev.runningAgents || []), ...agents])],
+    completedAgents: prev.completedAgents,
+  });
+};
+
+const completeAgent = (sessionId, agent) => {
+  const prev = workflowProgress.get(sessionId) || { running: true, completedAgents: [], runningAgents: [] };
+  workflowProgress.set(sessionId, {
+    running: true,
+    runningAgents: (prev.runningAgents || []).filter(a => a !== agent),
+    completedAgents: prev.completedAgents.includes(agent)
+      ? prev.completedAgents
+      : [...prev.completedAgents, agent],
+  });
+};
+
 // ─── Node: Supervisor ─────────────────────────────────────────────────────────
 const supervisorNode = async (state) => {
   console.log('\n🤖 [Supervisor] Placement workflow initialising');
+  workflowProgress.set(state.sessionId, { running: true, completedAgents: [], currentAgent: 'supervisor' });
   return { startedAt: new Date().toISOString() };
 };
 
 // ─── Node: Parallel (KB + Resume + JD via Promise.all) ───────────────────────
 const parallelNode = async (state) => {
   console.log('⚡ [Parallel] Running Knowledge, Resume, JD agents concurrently');
+  // Mark all three parallel agents as running simultaneously
+  markAgent(state.sessionId, 'knowledge', 'resume', 'jd');
 
   const [kbState, resumeState, jdState] = await Promise.all([
-    runKnowledgeExtractionAgent(state).catch((e) => {
+    runKnowledgeExtractionAgent(state).then((r) => { completeAgent(state.sessionId, 'knowledge'); return r; }).catch((e) => {
       console.error('KB agent error:', e.message);
+      completeAgent(state.sessionId, 'knowledge');
       return { knowledgeBaseResult: { error: e.message, hasKnowledgeBase: false, importantTopics: [] } };
     }),
-    runResumeAnalyzerAgent(state).catch((e) => {
+    runResumeAnalyzerAgent(state).then((r) => { completeAgent(state.sessionId, 'resume'); return r; }).catch((e) => {
       console.error('Resume agent error:', e.message);
+      completeAgent(state.sessionId, 'resume');
       return { resumeResult: { error: e.message, found: false, structured: null } };
     }),
-    runJDAnalyzerAgent(state).catch((e) => {
+    runJDAnalyzerAgent(state).then((r) => { completeAgent(state.sessionId, 'jd'); return r; }).catch((e) => {
       console.error('JD agent error:', e.message);
+      completeAgent(state.sessionId, 'jd');
       return { jdResult: { error: e.message, found: false, structured: null } };
     }),
   ]);
 
+  const kbResult = kbState.knowledgeBaseResult;
   return {
-    knowledgeBaseResult: kbState.knowledgeBaseResult,
+    knowledgeBaseResult: kbResult,
+    kbResult,            // alias so mockTest/readiness agents can read state.kbResult
     resumeResult:        resumeState.resumeResult,
     jdResult:            jdState.jdResult,
   };
@@ -93,10 +132,13 @@ const parallelNode = async (state) => {
 // ─── Node: Mock Test ──────────────────────────────────────────────────────────
 const mockTestNode = async (state) => {
   console.log('📝 [MockTest] Generating company-specific mock test');
+  markAgent(state.sessionId, 'mocktest');
   try {
     const result = await runMockTestGeneratorAgent(state);
+    completeAgent(state.sessionId, 'mocktest');
     return { mockTestResult: result.mockTestResult };
   } catch (e) {
+    completeAgent(state.sessionId, 'mocktest');
     return { mockTestResult: { generated: false, error: e.message } };
   }
 };
@@ -104,10 +146,13 @@ const mockTestNode = async (state) => {
 // ─── Node: Skill Gap ──────────────────────────────────────────────────────────
 const skillGapNode = async (state) => {
   console.log('🔬 [SkillGap] Analysing skill gaps');
+  markAgent(state.sessionId, 'skillgap');
   try {
     const result = await runSkillGapAnalysisAgent(state);
+    completeAgent(state.sessionId, 'skillgap');
     return { skillGapResult: result.skillGapResult };
   } catch (e) {
+    completeAgent(state.sessionId, 'skillgap');
     return { skillGapResult: { error: e.message, scores: { overallReadinessScore: 0, skillMatchPercentage: 0 } } };
   }
 };
@@ -115,10 +160,13 @@ const skillGapNode = async (state) => {
 // ─── Node: Roadmap ────────────────────────────────────────────────────────────
 const roadmapNode = async (state) => {
   console.log('🗺️  [Roadmap] Building personalised roadmap');
+  markAgent(state.sessionId, 'roadmap');
   try {
     const result = await runRoadmapGeneratorAgent(state);
+    completeAgent(state.sessionId, 'roadmap');
     return { roadmapResult: result.roadmapResult };
   } catch (e) {
+    completeAgent(state.sessionId, 'roadmap');
     return { roadmapResult: { generated: false, error: e.message } };
   }
 };
@@ -126,10 +174,13 @@ const roadmapNode = async (state) => {
 // ─── Node: Readiness ──────────────────────────────────────────────────────────
 const readinessNode = async (state) => {
   console.log('🎯 [Readiness] Calculating interview readiness');
+  markAgent(state.sessionId, 'readiness');
   try {
     const result = await runReadinessCalculatorAgent(state);
+    completeAgent(state.sessionId, 'readiness');
     return { readinessResult: result.readinessResult };
   } catch (e) {
+    completeAgent(state.sessionId, 'readiness');
     return { readinessResult: { error: e.message, scores: { overallReadiness: 0 } } };
   }
 };
@@ -148,6 +199,9 @@ const finalNode = async (state) => {
   if (errs.length) console.warn('⚠️  [Final] Partial errors:', errs.join(' | '));
   else console.log('✅ [Final] All agents completed successfully');
 
+  // Mark workflow done — clear progress after a short delay so last poll can read it
+  setTimeout(() => workflowProgress.delete(state.sessionId), 5000);
+
   return { completedAt: new Date().toISOString(), errors: errs };
 };
 
@@ -156,20 +210,22 @@ const buildGraph = () => {
   const g = new StateGraph(PlacementState);
 
   // Register nodes
-  g.addNode('supervisor',   supervisorNode);
-  g.addNode('parallel',     parallelNode);
-  g.addNode('skillGap',     skillGapNode);
-  g.addNode('roadmap',      roadmapNode);
-  g.addNode('readiness',    readinessNode);
+  g.addNode('supervisor',      supervisorNode);
+  g.addNode('parallel',        parallelNode);
+  g.addNode('mockTest',        mockTestNode);
+  g.addNode('skillGap',        skillGapNode);
+  g.addNode('roadmap',         roadmapNode);
+  g.addNode('readiness',       readinessNode);
   g.addNode('finalSupervisor', finalNode);
 
   // Linear edges
-  g.addEdge(START,          'supervisor');
-  g.addEdge('supervisor',   'parallel');
-  g.addEdge('parallel',     'skillGap');
-  g.addEdge('skillGap',     'roadmap');
-  g.addEdge('roadmap',      'readiness');
-  g.addEdge('readiness',    'finalSupervisor');
+  g.addEdge(START,             'supervisor');
+  g.addEdge('supervisor',      'parallel');
+  g.addEdge('parallel',        'mockTest');
+  g.addEdge('mockTest',        'skillGap');
+  g.addEdge('skillGap',        'roadmap');
+  g.addEdge('roadmap',         'readiness');
+  g.addEdge('readiness',       'finalSupervisor');
   g.addEdge('finalSupervisor', END);
 
   return g.compile();

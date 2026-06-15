@@ -11,9 +11,25 @@ import api from '../utils/api';
 import toast from 'react-hot-toast';
 
 const LEVEL_CONFIG = {
-  low:    { color: 'text-red-500', bg: 'bg-red-500', label: 'Low Readiness', range: '0–40%' },
+  // Backend tier values
+  interview_ready:  { color: 'text-green-500',  bg: 'bg-green-500',  label: 'Interview Ready',  range: '80–100%' },
+  near_ready:       { color: 'text-blue-500',   bg: 'bg-blue-500',   label: 'Near Ready',        range: '65–79%' },
+  developing:       { color: 'text-yellow-500', bg: 'bg-yellow-500', label: 'Developing',        range: '45–64%' },
+  early_stage:      { color: 'text-orange-500', bg: 'bg-orange-500', label: 'Early Stage',       range: '25–44%' },
+  needs_foundation: { color: 'text-red-500',    bg: 'bg-red-500',    label: 'Needs Foundation',  range: '0–24%' },
+  // Legacy fallbacks
+  high:   { color: 'text-green-500',  bg: 'bg-green-500',  label: 'High Readiness',   range: '71–100%' },
   medium: { color: 'text-yellow-500', bg: 'bg-yellow-500', label: 'Medium Readiness', range: '41–70%' },
-  high:   { color: 'text-green-500', bg: 'bg-green-500', label: 'High Readiness', range: '71–100%' },
+  low:    { color: 'text-red-500',    bg: 'bg-red-500',    label: 'Low Readiness',    range: '0–40%' },
+};
+
+// Derive tier from composite score when backend doesn't return a recognised tier
+const scoreTotier = (score) => {
+  if (score >= 80) return 'interview_ready';
+  if (score >= 65) return 'near_ready';
+  if (score >= 45) return 'developing';
+  if (score >= 25) return 'early_stage';
+  return 'needs_foundation';
 };
 
 export default function Readiness() {
@@ -71,7 +87,10 @@ export default function Readiness() {
     companyReadinessScore: data.scores?.kb || data.scores?.companyReadinessScore || 0,
   };
 
-  const readinessLevel = data.readinessTier || data.readinessLevel || 'low';
+  const rawTier = data.readinessTier || data.readinessLevel || '';
+  const readinessLevel = LEVEL_CONFIG[rawTier]
+    ? rawTier
+    : scoreTotier(scores.overallReadiness);
   const interviewProbability = data.hiringProbabilityNow || data.interviewProbability || 0;
   const detailedReasoning = data.executiveSummary || data.detailedReasoning || '';
   
@@ -101,7 +120,7 @@ export default function Readiness() {
     systemDesign: rawBreakdown.online_assessment?.score || rawBreakdown.systemDesign || 0,
   };
 
-  const level = LEVEL_CONFIG[readinessLevel] || LEVEL_CONFIG.low;
+  const level = LEVEL_CONFIG[readinessLevel] ?? LEVEL_CONFIG.needs_foundation;
 
   const radarData = [
     { subject: 'Resume', value: scores.resumeMatchScore || 0 },

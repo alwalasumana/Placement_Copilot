@@ -85,8 +85,41 @@ const skillCategorizerNode = async (state) => {
       ? (p.experience || []).map(e => `${e.title} at ${e.company}`).join("; ")
       : "No work experience (fresher)";
     const categorizedSkills = await generateJSON(
-      "You are a senior technical recruiter evaluating a candidate resume.\n\nCANDIDATE PROFILE:\n- Education: " + educationSummary + "\n- Experience: " + experienceSummary + "\n- All skills: " + allSkills.join(", ") + "\n- Projects: " + (p.projects || []).length + " projects\n- Certifications: " + (p.certifications || []).map(c => c.name).join(", ") + "\n\nReturn EXACTLY this JSON:\n{\n  \"technical\": { \"core_languages\": [{\"skill\":\"Python\",\"proficiency\":\"advanced\",\"confidence\":85}], \"frameworks_libraries\": [], \"databases\": [], \"devops_tools\": [], \"cloud_platforms\": [] },\n  \"domain_knowledge\": [\"Web Development\"],\n  \"soft_skills\": [\"Problem Solving\"],\n  \"standout_skills\": [\"Python\"],\n  \"skill_gaps_visible\": [\"No cloud certification\"],\n  \"ats_keywords\": [\"REST API\",\"CI/CD\",\"Agile\"],\n  \"resume_quality\": { \"ats_score\": 72, \"format_score\": 80, \"completeness_score\": 75, \"has_summary\": true, \"has_quantified_achievements\": false, \"has_action_verbs\": true, \"keyword_density\": \"medium\", \"improvements\": [\"Add quantified metrics\",\"Add LinkedIn URL\"] }\n}",
-      { temperature: 0.1, maxOutputTokens: 3000 }
+      "You are a senior technical recruiter evaluating a candidate resume.\n\n" +
+      "CANDIDATE PROFILE:\n" +
+      "- Education: " + (educationSummary || "Not specified") + "\n" +
+      "- Experience: " + experienceSummary + "\n" +
+      "- All skills (" + allSkills.length + " total): " + allSkills.join(", ") + "\n" +
+      "- Projects: " + (p.projects || []).length + " projects\n" +
+      "- Certifications: " + ((p.certifications || []).map(c => c.name || c).join(", ") || "None") + "\n\n" +
+      "SCORING RULES — calculate REAL scores based on the profile above, do NOT copy example values:\n" +
+      "- ats_score (0-100): based on skill count, project depth, certifications, and experience. " +
+        "Fresher with <10 skills = 30-45. Fresher with 10-20 skills + projects = 45-65. Experienced = 65-85.\n" +
+      "- format_score (0-100): estimate from presence of education, experience, projects, summary.\n" +
+      "- completeness_score (0-100): based on how many sections are filled.\n\n" +
+      "Return EXACTLY this JSON structure (fill all fields with REAL calculated values):\n" +
+      JSON.stringify({
+        technical: {
+          core_languages: [{ skill: "Python", proficiency: "advanced", confidence: 85 }],
+          frameworks_libraries: [], databases: [], devops_tools: [], cloud_platforms: []
+        },
+        domain_knowledge: ["Web Development"],
+        soft_skills: ["Problem Solving"],
+        standout_skills: ["Python"],
+        skill_gaps_visible: ["No cloud certification"],
+        ats_keywords: ["REST API", "CI/CD", "Agile"],
+        resume_quality: {
+          ats_score: 0,
+          format_score: 0,
+          completeness_score: 0,
+          has_summary: false,
+          has_quantified_achievements: false,
+          has_action_verbs: true,
+          keyword_density: "medium",
+          improvements: ["Add quantified metrics", "Add LinkedIn URL"]
+        }
+      }),
+      { temperature: 0.2, maxOutputTokens: 3000 }
     );
     console.log("[ResumeAgent] 3/4 Categorized", allSkills.length, "skills, ATS:", categorizedSkills.resume_quality?.ats_score);
     return { categorizedSkills };
@@ -111,7 +144,70 @@ const finalResumeReportNode = async (state) => {
     ...(p.skills?.cloud || []),
     ...(p.skills?.other || []),
   ];
-  const atsScore = categorizedSkills?.resume_quality?.ats_score || 50;
+  // Compute ATS score programmatically from real resume data — never rely on AI example values
+  let computedAts = 0;
+  
+  // Section 1: Contact Information (Max 15 pts)
+  const info = p.personalInfo || {};
+  if (info.email) computedAts += 4;
+  if (info.phone) computedAts += 4;
+  if (info.linkedin) computedAts += 4;
+  if (info.github || info.portfolio) computedAts += 3;
+
+  // Section 2: Education (Max 15 pts)
+  if (p.education && p.education.length > 0) {
+    computedAts += 8;
+    const hasDetails = p.education.some(edu => edu.degree && edu.institution && edu.year);
+    if (hasDetails) computedAts += 7;
+  }
+
+  // Section 3: Experience (Max 25 pts)
+  if (p.experience && p.experience.length > 0) {
+    computedAts += 10;
+    let hasResponsibilities = false;
+    let hasMetrics = false;
+    for (const exp of p.experience) {
+      if (exp.responsibilities && exp.responsibilities.length > 0) hasResponsibilities = true;
+      const text = (exp.responsibilities || []).join(" ") + " " + (exp.impact || "");
+      if (/\b\d+(%|\s*(years|months|users|clients|projects|increase|reduction|improvement|speed|latency|cost|revenue|usd|rs|inr|percent))\b/i.test(text)) {
+        hasMetrics = true;
+      }
+    }
+    if (hasResponsibilities) computedAts += 8;
+    if (hasMetrics) computedAts += 7;
+  } else {
+    // Fresher compensation (projects carry more weight)
+    computedAts += 5;
+  }
+
+  // Section 4: Projects (Max 25 pts)
+  if (p.projects && p.projects.length > 0) {
+    computedAts += 10;
+    const projectCount = p.projects.length;
+    computedAts += Math.min(8, projectCount * 3);
+    
+    let hasTech = false;
+    let hasMetrics = false;
+    for (const proj of p.projects) {
+      if (proj.technologies && proj.technologies.length > 0) hasTech = true;
+      const text = proj.description + " " + (proj.highlights || []).join(" ");
+      if (/\b\d+(%|\s*(users|clients|projects|increase|reduction|improvement|speed|latency|cost|revenue|usd|rs|inr|percent))\b/i.test(text)) {
+        hasMetrics = true;
+      }
+    }
+    if (hasTech) computedAts += 4;
+    if (hasMetrics) computedAts += 3;
+  }
+
+  // Section 5: Skills (Max 15 pts)
+  const skillCount = allSkills.length;
+  computedAts += Math.min(15, skillCount * 1.5);
+
+  // Section 6: Summary & Certifications (Max 5 pts)
+  if (p.summary) computedAts += 2;
+  if (p.certifications && p.certifications.length > 0) computedAts += 3;
+
+  const atsScore = Math.min(100, Math.max(30, Math.round(computedAts)));
   const structured = {
     personalInfo: p.personalInfo || {},
     summary: p.summary || null,

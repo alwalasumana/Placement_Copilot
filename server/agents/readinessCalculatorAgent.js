@@ -104,22 +104,23 @@ const scoreAggregatorNode = async (state) => {
       }
     }
 
-    // Resume score: ATS score from resume agent
-    let resumeScore = resume.score || resume.structured?.overallScore || 0;
-    if (resumeScore === 0) {
+    // Resume score: ATS score from resume agent, blended with skill match score for dynamic evaluation
+    let resumeBaseScore = resume.score || resume.structured?.overallScore || 0;
+    if (resumeBaseScore === 0) {
       try {
-        const Resume = (await import("../models/Resume.js")).default;
-        const resumeDoc = await Resume.findOne({ sessionId });
+        const ResumeModel = (await import("../models/Resume.js")).default;
+        const resumeDoc = await ResumeModel.findOne({ sessionId });
         if (resumeDoc) {
-          resumeScore = resumeDoc.score || resumeDoc.structured?.overallScore || 50;
+          resumeBaseScore = resumeDoc.score || resumeDoc.structured?.overallScore || 50;
         } else {
-          resumeScore = 50;
+          resumeBaseScore = 50;
         }
       } catch (err) {
         console.error("Resume score fallback error:", err.message);
-        resumeScore = 50;
+        resumeBaseScore = 50;
       }
     }
+    const resumeScore = Math.round((resumeBaseScore * 0.7) + (skillMatchScore * 0.3));
 
     // KB score: based on KB chunk coverage
     let totalChunks = kb.chunkCount || kb.chunks || kb.totalChunks || 0;
@@ -169,6 +170,12 @@ const scoreAggregatorNode = async (state) => {
     }
     const roadmapScore = hasRoadmap ? 80 : 0;
 
+    // Calculate programmatic interview round readiness scores
+    const onlineAssessment = Math.min(100, Math.round((mockTestScore * 0.4) + (skillMatchScore * 0.4) + (criticalSkillsScore * 0.2)));
+    const technicalInterview = Math.min(100, Math.round((skillMatchScore * 0.4) + (criticalSkillsScore * 0.3) + (kbScore * 0.2) + (mockTestScore * 0.1)));
+    const hrRound = Math.min(100, Math.round((resumeBaseScore * 0.5) + (mockTestScore * 0.3) + 20));
+    const codingRound = Math.min(100, Math.round((mockTestScore * 0.5) + (skillMatchScore * 0.3) + (criticalSkillsScore * 0.2)));
+
     // Composite (Mock Test excluded from readiness calculation):
     // skillMatch 40%, criticalSkills 30%, resume 15%, kb 10%, roadmap 5%
     const compositeReadiness = Math.round(
@@ -200,6 +207,12 @@ const scoreAggregatorNode = async (state) => {
         weeksToReady: sg.weeksToReady || rm.totalWeeks || 10,
         hiringProbabilityNow: sg.hiringProbabilityNow || 30,
         hiringProbabilityPrepared: sg.hiringProbabilityPrepared || 70,
+        calculatedInterviewReadiness: {
+          onlineAssessment,
+          technicalInterview,
+          hrRound,
+          codingRound
+        }
       }
     };
     console.log("[ReadinessAgent] 1/3 Composite readiness:", compositeReadiness + "%");
@@ -234,31 +247,38 @@ const readinessAnalyzerNode = async (state) => {
       "WEEKS TO READY: " + ctx.weeksToReady + "\n" +
       "HIRING PROBABILITY NOW: " + ctx.hiringProbabilityNow + "%\n" +
       "HIRING PROBABILITY PREPARED: " + ctx.hiringProbabilityPrepared + "%\n\n" +
+      "PROGRAMMATIC INTERVIEW ROUND SCORES (DO NOT CHANGE THESE SCORE VALUES IN YOUR OUTPUT):\n" +
+      "- Online Assessment: " + ctx.calculatedInterviewReadiness?.onlineAssessment + "%\n" +
+      "- Technical Interview: " + ctx.calculatedInterviewReadiness?.technicalInterview + "%\n" +
+      "- HR Round: " + ctx.calculatedInterviewReadiness?.hrRound + "%\n" +
+      "- Coding Round: " + ctx.calculatedInterviewReadiness?.codingRound + "%\n\n" +
       "Return EXACTLY this JSON:\n" +
+      "IMPORTANT: Use the ACTUAL scores provided above in SCORE BREAKDOWN — do NOT invent new scores. " +
+      "The readiness_breakdown scores below must match the values given in SCORE BREAKDOWN.\n\n" +
       JSON.stringify({
         readiness_tier: "developing",
-        executive_summary: "2-3 sentence overall assessment of the candidate.",
+        executive_summary: "Write 2-3 sentences assessing this specific candidate based on the data above.",
         readiness_breakdown: {
-          skill_match: { score: 60, status: "developing", note: "Missing 3 critical skills" },
-          critical_skills: { score: 55, status: "weak", note: "2 of 5 critical skills present" },
-          resume_quality: { score: 72, status: "moderate", note: "ATS-optimized but needs metrics" },
-          knowledge_base: { score: 40, status: "weak", note: "Sparse KB - add more notes" },
-          mock_performance: { score: 0, status: "not_taken", note: "Run a mock test to get a score" },
-          roadmap_presence: { score: 80, status: "good", note: "Has a 12-week roadmap" }
+          skill_match:      { score: 0, status: "developing", note: "Write a specific note about skill match." },
+          critical_skills:  { score: 0, status: "weak",       note: "Write a specific note about critical skills." },
+          resume_quality:   { score: 0, status: "moderate",   note: "Write a specific note about resume quality." },
+          knowledge_base:   { score: 0, status: "weak",       note: "Write a specific note about knowledge base." },
+          mock_performance: { score: 0, status: "not_taken",  note: "Write a specific note about mock test performance." },
+          roadmap_presence: { score: 0, status: "good",       note: "Write a specific note about roadmap." }
         },
-        top_strengths: [{ strength: "Strong Python skills", impact: "high", evidence: "3 Python projects" }],
-        critical_gaps_to_fix: [{ gap: "No cloud certification", severity: "high", fix: "Complete AWS Cloud Practitioner in 2 weeks", time_required: "2 weeks" }],
-        immediate_actions: [{ action: "Complete 2 LeetCode mediums daily", timeframe: "This week", impact: "high", effort: "medium" }],
+        top_strengths: [{ strength: "Specific strength from resume", impact: "high", evidence: "Specific evidence" }],
+        critical_gaps_to_fix: [{ gap: "Specific gap from JD", severity: "high", fix: "Specific action", time_required: "X weeks" }],
+        immediate_actions: [{ action: "Specific action item", timeframe: "This week", impact: "high", effort: "medium" }],
         interview_round_readiness: {
-          online_assessment: { ready: false, score: 45, gaps: ["More DSA practice needed"] },
-          technical_interview: { ready: false, score: 55, gaps: ["System design basics"] },
-          hr_round: { ready: true, score: 80, gaps: [] },
-          coding_round: { ready: false, score: 50, gaps: ["More medium problems"] }
+          online_assessment:   { ready: false, score: 0, gaps: ["Specific gap"] },
+          technical_interview: { ready: false, score: 0, gaps: ["Specific gap"] },
+          hr_round:            { ready: true,  score: 0, gaps: [] },
+          coding_round:        { ready: false, score: 0, gaps: ["Specific gap"] }
         },
-        timeline_to_readiness: { weeks_needed: 10, key_milestones: [{ week: 4, milestone: "DSA solid" }, { week: 8, milestone: "Projects ready" }, { week: 10, milestone: "Interview ready" }] },
-        motivational_note: "You have a strong foundation. With focused effort on the identified gaps, you can be interview-ready in 10 weeks.",
-        hiring_probability_now: 35,
-        hiring_probability_prepared: 72
+        timeline_to_readiness: { weeks_needed: 8, key_milestones: [{ week: 4, milestone: "Core skills ready" }, { week: 8, milestone: "Interview ready" }] },
+        motivational_note: "Write an encouraging, specific motivational note for this candidate.",
+        hiring_probability_now: 0,
+        hiring_probability_prepared: 0
       }),
       { temperature: 0.3, maxOutputTokens: 2000 }
     );
@@ -294,6 +314,35 @@ const reportAssemblerNode = async (state) => {
   );
   const readinessTier = tierMap[rawTier] || "developing";
 
+  const calculated = ctx.calculatedInterviewReadiness || {};
+  const onlineAssessment = calculated.onlineAssessment || 0;
+  const technicalInterview = calculated.technicalInterview || 0;
+  const hrRound = calculated.hrRound || 0;
+  const codingRound = calculated.codingRound || 0;
+
+  const interviewRoundReadiness = {
+    online_assessment: {
+      ready: onlineAssessment >= 70,
+      score: onlineAssessment,
+      gaps: r.interview_round_readiness?.online_assessment?.gaps || []
+    },
+    technical_interview: {
+      ready: technicalInterview >= 70,
+      score: technicalInterview,
+      gaps: r.interview_round_readiness?.technical_interview?.gaps || []
+    },
+    hr_round: {
+      ready: hrRound >= 70,
+      score: hrRound,
+      gaps: r.interview_round_readiness?.hr_round?.gaps || []
+    },
+    coding_round: {
+      ready: codingRound >= 70,
+      score: codingRound,
+      gaps: r.interview_round_readiness?.coding_round?.gaps || []
+    }
+  };
+
   const docData = {
     sessionId, candidateName: ctx.name || "Candidate",
     role: ctx.role || "Software Engineer", company: ctx.company || null,
@@ -312,7 +361,7 @@ const reportAssemblerNode = async (state) => {
     topStrengths:            r.top_strengths             || [],
     criticalGapsToFix:       r.critical_gaps_to_fix      || [],
     immediateActions:        r.immediate_actions         || [],
-    interviewRoundReadiness: r.interview_round_readiness || {},
+    interviewRoundReadiness: interviewRoundReadiness,
     timelineToReadiness:     r.timeline_to_readiness     || {},
     motivationalNote:        r.motivational_note         || "",
     hiringProbabilityNow:    r.hiring_probability_now    || ctx.hiringProbabilityNow || 30,

@@ -7,6 +7,8 @@ const roadmapSchema = new mongoose.Schema(
     role:           String,
     company:        String,
     totalWeeks:     Number,
+    totalDays:      Number,
+    timeframeUnit:  { type: String, enum: ['weeks', 'days'], default: 'weeks' },
     overallTheme:   String,
 
     // LangGraph agent saves rich nested data here

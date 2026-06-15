@@ -1,12 +1,13 @@
 {
   "name": "placement-copilot-server",
   "version": "1.0.0",
-  "description": "Placement Copilot Backend – Multi-Agent AI System",
+  "description": "Placement Copilot Backend",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "test": "node --test tests/utils.test.js",
     "lint": "eslint ."
   },
   "dependencies": {

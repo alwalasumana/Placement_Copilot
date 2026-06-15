@@ -21,7 +21,7 @@ export function LoadingScreen({ message = 'Processing...' }) {
   );
 }
 
-export function AgentProgress({ agents = [], currentAgent, completed = false }) {
+export function AgentProgress({ agents = [], currentAgent, currentAgents = [], completed = false }) {
   const agentList = [
     { id: 'knowledge',  label: 'Knowledge Extraction' },
     { id: 'resume',     label: 'Resume Analysis' },
@@ -32,11 +32,17 @@ export function AgentProgress({ agents = [], currentAgent, completed = false }) 
     { id: 'readiness',  label: 'Readiness Calculation' },
   ];
 
+  // Support both single currentAgent (legacy) and currentAgents array (parallel)
+  const activeSet = new Set([
+    ...(Array.isArray(currentAgents) ? currentAgents : []),
+    ...(currentAgent ? [currentAgent] : []),
+  ]);
+
   return (
     <div className="space-y-3">
       {agentList.map((agent, i) => {
         const isDone = completed || agents.includes(agent.id);
-        const isActive = currentAgent === agent.id;
+        const isActive = !isDone && activeSet.has(agent.id);
 
         return (
           <div key={agent.id} className="flex items-center gap-3">
